@@ -1,3 +1,5 @@
+#define ESPLINK_TARGET_ESP8266
+
 #include "sensor/BMI270Rotation.h"
 #include "driver/Motordriver.h"
 #include "sensor/WheelEncoder.h"
@@ -9,26 +11,26 @@
 #include <math.h>
 
 // 行为参数（可根据实际测试效果调整）
-static const int   FORWARD_SPEED_PCT   = 80;   // 默认前进速度 (%)
-static const int   TURN_SPEED_PCT      = 60;   // 转向时的轮速 (%)
-static const float FRONT_STOP_DIST_CM  = 30.0f;// 正前方触发停车距离
-static const float CLEAR_DIST_CM       = 40.0f;// 判定"无障碍物"的距离阈值
+static const int   FORWARD_SPEED_PCT   = 50;   // 默认前进速度 (%)
+static const int   TURN_SPEED_PCT      = 55;   // 转向时的轮速 (%)
+static const float FRONT_STOP_DIST_CM  = 20.0f;// 正前方触发停车距离
+static const float CLEAR_DIST_CM       = 15.0f;// 判定"无障碍物"的距离阈值
 
 // 舵机角度约定
 static const int   SERVO_FRONT_DEG     = 90;
 static const int   SERVO_LEFT_DEG      = 180;
 static const int   SERVO_RIGHT_DEG     = 0;
 
-static const float TURN_STEP_DEG       = 80.0f; // 每次确认方向后，先转多少度再重新前进探测
+static const float TURN_STEP_DEG       = 83.0f; // 每次确认方向后，先转多少度再重新前进探测
 static const float YAW_TOLERANCE_DEG   = 3.0f;  // 转向到位的容差
 
-static const int   MAX_OBSTACLES       = 50;     // 障碍物坐标数组容量
+static const int   MAX_OBSTACLES       = 999;     // 障碍物坐标数组容量
 
 // 左右都有障碍时的后退策略：第一次后退 BACKUP_STEP_CM，
 // 若再次左右都被挡住，则后退距离变为 BACKUP_STEP_CM*2，再不行 *3，以此类推，
 // 直到某一侧探测到无障碍物为止；一旦成功找到可通行方向，倍数清零重置为1。
-static const float BACKUP_STEP_CM      = 50.0f;
-static const int   BACKUP_SPEED_PCT    = 45;   // 后退速度 (%)
+static const float BACKUP_STEP_CM      = 5.0f;
+static const int   BACKUP_SPEED_PCT    = 35;   // 后退速度 (%)
 
 // 硬件配置
 DistanceDetector barrierDetector(ULTRASONIC_TRIG_PIN, ULTRASONIC_ECHO_PIN, SERVO_PIN);
@@ -170,13 +172,13 @@ void loop() {
     imuRot.getRotation(ix, iy, yaw); // yaw(z) 作为航向角使用
 
     // 每0.5秒打印一次调试信息
-    if (millis() - lastLoop >= 500) {
+    if (millis() - lastLoop >= 100) {
         lastLoop = millis();
-        Serial.print("Left: "); Serial.print(leftEncoder.getCount());
-        Serial.print(" Yaw(Z):"); Serial.print(yaw, 2);
-        Serial.print(" Pos:("); Serial.print(robotX, 1);
-        Serial.print(","); Serial.print(robotY, 1);
-        Serial.print(") State:"); Serial.println((int)state);
+        // Serial.print("Left: "); Serial.print(leftEncoder.getCount());
+        // Serial.print(" Yaw(Z):"); Serial.print(yaw, 2);
+        // Serial.print(" Pos:("); Serial.print(robotX, 1);
+        // Serial.print(","); Serial.print(robotY, 1);
+        // Serial.print(") State:"); Serial.println((int)state);
         esp.putln("@" + String(robotX, 2) + "," + String(robotY, 2));// 发送当前位置给ESP8266 保留2位小数
     }
 

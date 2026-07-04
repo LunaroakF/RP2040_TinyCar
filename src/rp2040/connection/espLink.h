@@ -4,7 +4,19 @@
 #include <Arduino.h>
 
 // 必须与ESP32/ESP8266端的 FRAME_SIZE 保持一致
-#define ESPLINK_FRAME_SIZE   64
+//
+// ESP32 (driver/spi_slave.h 硬件驱动): 帧长可以自定义, 之前用的是64字节
+// ESP8266 (内置 SPISlave 库): 硬件限制, 每次收发必须严格是32字节
+//
+// 在RP2040这边编译时，取消下面这一行的注释即可切到ESP8266对应的帧长；
+// 保持注释状态(不定义)则默认按ESP32的64字节编译。
+// #define ESPLINK_TARGET_ESP8266
+
+#ifdef ESPLINK_TARGET_ESP8266
+#define ESPLINK_FRAME_SIZE   32   // 必须和ESP8266端 FRAME_SIZE 一致
+#else
+#define ESPLINK_FRAME_SIZE   64   // 必须和ESP32端 FRAME_SIZE 一致
+#endif
 #define ESPLINK_MAX_PAYLOAD  (ESPLINK_FRAME_SIZE - 1)
 
 // RP2040 -> ESP32/ESP8266 的SPI消息发送封装
