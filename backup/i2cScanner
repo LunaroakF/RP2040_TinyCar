@@ -1,0 +1,23 @@
+#include <Arduino.h>
+#include "SensorManager.h"
+
+// 实例化管理器：传入硬件 Wire0 (即 Wire)，Pico 对应的 I2C 引脚（例如 SDA=GP4, SCL=GP5）
+SensorManager imuScanner(Wire, 4, 5);
+
+void setup() {
+    Serial.begin(115200);
+    while (!Serial) delay(10); // 等待串口监视器打开
+
+    Serial.println(F("\n=== Arduino 传感器自适应系统启动 ==="));
+
+    // 初始化 I2C 总线
+    imuScanner.init_bus();
+
+    // 自动扫描、识别、匹配并初始化
+    imuScanner.scan_and_initialize();
+}
+
+void loop() {
+    // 你的其他逻辑，比如读取已经初始化好的 IMU 原始数据
+    delay(1000);
+}

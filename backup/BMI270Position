@@ -1,0 +1,280 @@
+/*
+ * BMI270 惯性导航系统 - 优化移植版
+ * 针对漂移问题的四项核心改进：
+ * 1. ZUPT 零速检测（取代简单硬阈值）
+ * 2. 自适应速度阻尼（运动结束后快速衰减）
+ * 3. 修复中断/主循环数据竞争（注意：I2C读取移至主循环或严格临界区）
+ * 4. 提升校准精度（500点 + 方差剔除）
+ */
+
+#include "config.h"
+#include <Wire.h>
+#include <SparkFun_BMI270_Arduino_Library.h>
+
+BMI270 imu;
+
+struct repeating_timer timer;
+
+const float dt = 0.01f;          // 100Hz，10ms
+const float GRAVITY = 9.80665f;
+const float DEG2RAD = 3.14159265f / 180.0f;
+
+// =====================================================================
+// 【调节区】根据实际环境调整
+// =====================================================================
+
+// 低通滤波系数（0.05~0.2）：越小越平滑但延迟越大
+const float ALPHA = 0.1f;
+
+// ZUPT 静止判定门槛（单位：m/s²）
+#define ZUPT_ACCEL_THRESHOLD  0.15f   // 低于此值认为该轴无有效加速度
+#define ZUPT_GYRO_THRESHOLD   0.05f   // 低于此值（rad/s）认为无旋转
+
+// 运动停止后速度衰减系数（每帧乘以此值）
+#define VEL_DECAY  0.90f
+
+// 速度归零门槛（m/s）
+#define VEL_ZERO_THRESH  0.015f
+
+// =====================================================================
+// 导航状态变量
+// =====================================================================
+static float roll  = 0.0f, pitch = 0.0f, yaw = 0.0f;
+static float velX  = 0.0f, velY  = 0.0f, velZ = 0.0f;
+static float posX  = 0.0f, posY  = 0.0f, posZ = 0.0f;
+
+// 零偏（setup 中标定，之后只读）
+static float ax_bias = 0.0f, ay_bias = 0.0f, az_bias = 0.0f;
+static float gx_bias = 0.0f, gy_bias = 0.0f, gz_bias = 0.0f;
+
+// 低通滤波历史
+static float last_ax = 0.0f, last_ay = 0.0f, last_az = 0.0f;
+
+// 供主循环读取的快照
+volatile float snap_posX, snap_posY, snap_posZ;
+volatile float snap_velX, snap_velY, snap_velZ;
+volatile float snap_ax,   snap_ay,   snap_az;
+volatile bool  snap_zupt = false;   // 当前是否处于 ZUPT 静止状态
+
+// 用于触发核心计算的原子标志位
+volatile bool sensor_data_ready = false;
+
+// =====================================================================
+// 判断是否静止（ZUPT：Zero velocity UPdaTe）
+// =====================================================================
+static inline bool isStationary(float eax, float eay, float eaz,
+                                float gx,  float gy,  float gz) {
+    bool accel_still = (fabsf(eax) < ZUPT_ACCEL_THRESHOLD) &&
+                       (fabsf(eay) < ZUPT_ACCEL_THRESHOLD) &&
+                       (fabsf(eaz) < ZUPT_ACCEL_THRESHOLD);
+    bool gyro_still  = (fabsf(gx)  < ZUPT_GYRO_THRESHOLD)  &&
+                       (fabsf(gy)  < ZUPT_GYRO_THRESHOLD)  &&
+                       (fabsf(gz)  < ZUPT_GYRO_THRESHOLD);
+    return accel_still && gyro_still;
+}
+
+// =====================================================================
+// 定时器中断回调（100Hz）
+// 核心改动：由于I2C在中断中读取极易死机，这里仅做定时触发
+// =====================================================================
+bool timer_callback(struct repeating_timer *t) {
+    sensor_data_ready = true; 
+    return true;
+}
+
+// =====================================================================
+// 惯性导航核心解算算法
+// =====================================================================
+void updateNavigation(float r_ax, float r_ay, float r_az, float r_gx, float r_gy, float r_gz) {
+    // --- 1. 去偏 + 单位换算 ---
+    float raw_ax = (r_ax - ax_bias) * GRAVITY;
+    float raw_ay = (r_ay - ay_bias) * GRAVITY;
+    float raw_az = (r_az - az_bias) * GRAVITY;
+
+    // --- 2. 低通滤波 ---
+    float ax_f = ALPHA * raw_ax + (1.0f - ALPHA) * last_ax;
+    float ay_f = ALPHA * raw_ay + (1.0f - ALPHA) * last_ay;
+    float az_f = ALPHA * raw_az + (1.0f - ALPHA) * last_az;
+    last_ax = ax_f; last_ay = ay_f; last_az = az_f;
+
+    // --- 3. 陀螺仪去偏，转换到 rad/s ---
+    float gx = (r_gx - gx_bias) * DEG2RAD;
+    float gy = (r_gy - gy_bias) * DEG2RAD;
+    float gz = (r_gz - gz_bias) * DEG2RAD;
+
+    // --- 4. 姿态积分（陀螺仪） ---
+    roll  += gx * dt;
+    pitch += gy * dt;
+    yaw   += gz * dt;
+
+    // --- 5. 互补滤波修正 roll/pitch ---
+    float accel_roll  = atan2f(ay_f, az_f);
+    float accel_pitch = atan2f(-ax_f, sqrtf(ay_f * ay_f + az_f * az_f));
+    roll  = 0.995f * roll  + 0.005f * accel_roll;
+    pitch = 0.995f * pitch + 0.005f * accel_pitch;
+
+    // --- 6. 旋转矩阵：机体系 → 地球系 ---
+    float sr = sinf(roll),  cr = cosf(roll);
+    float sp = sinf(pitch), cp = cosf(pitch);
+    float sy = sinf(yaw),   cy = cosf(yaw);
+
+    float earth_ax = ax_f * (cp * cy)
+                   + ay_f * (sr * sp * cy - cr * sy)
+                   + az_f * (cr * sp * cy + sr * sy);
+    float earth_ay = ax_f * (cp * sy)
+                   + ay_f * (sr * sp * sy + cr * cy)
+                   + az_f * (cr * sp * sy - sr * cy);
+    float earth_az = ax_f * (-sp)
+                   + ay_f * (sr * cp)
+                   + az_f * (cr * cp);
+
+    // --- 7. 剥离重力（地球系 Z 轴） ---
+    earth_az -= GRAVITY;
+
+    // --- 8. ZUPT 双重静止检测 ---
+    bool still = isStationary(earth_ax, earth_ay, earth_az, gx, gy, gz);
+
+    if (still) {
+        velX *= VEL_DECAY;
+        velY *= VEL_DECAY;
+        velZ *= VEL_DECAY;
+        if (fabsf(velX) < VEL_ZERO_THRESH) velX = 0.0f;
+        if (fabsf(velY) < VEL_ZERO_THRESH) velY = 0.0f;
+        if (fabsf(velZ) < VEL_ZERO_THRESH) velZ = 0.0f;
+    } else {
+        velX += earth_ax * dt;
+        velY += earth_ay * dt;
+        velZ += earth_az * dt;
+    }
+
+    // --- 9. 位置积分 ---
+    posX += velX * dt;
+    posY += velY * dt;
+    posZ += velZ * dt;
+
+    // --- 10. 更新快照 ---
+    snap_posX = posX; snap_posY = posY; snap_posZ = posZ;
+    snap_velX = velX; snap_velY = velY; snap_velZ = velZ;
+    snap_ax   = earth_ax; snap_ay = earth_ay; snap_az = earth_az;
+    snap_zupt = still;
+}
+
+// =====================================================================
+// 校准辅助：带方差剔除的高精度静态采样
+// =====================================================================
+static bool deepCalibrate(int samples) {
+    float sum_ax = 0, sum_ay = 0, sum_az = 0;
+    float sum_gx = 0, sum_gy = 0, sum_gz = 0;
+    float sq_ax  = 0, sq_ay  = 0;
+
+    for (int i = 0; i < samples; i++) {
+        imu.getSensorData();
+
+        sum_ax += imu.data.accelX; sq_ax += imu.data.accelX * imu.data.accelX;
+        sum_ay += imu.data.accelY; sq_ay += imu.data.accelY * imu.data.accelY;
+        sum_az += imu.data.accelZ;
+        sum_gx += imu.data.gyroX;
+        sum_gy += imu.data.gyroY;
+        sum_gz += imu.data.gyroZ;
+        delay(5);
+    }
+
+    float mean_ax = sum_ax / samples;
+    float mean_ay = sum_ay / samples;
+
+    float var_ax = sq_ax / samples - mean_ax * mean_ax;
+    float var_ay = sq_ay / samples - mean_ay * mean_ay;
+    if (sqrtf(var_ax) > 0.05f || sqrtf(var_ay) > 0.05f) {
+        return false;
+    }
+
+    ax_bias = mean_ax;
+    ay_bias = mean_ay;
+    az_bias = (sum_az / samples) - 1.0f; // 假设 Z 轴垂直朝上
+    gx_bias = sum_gx / samples;
+    gy_bias = sum_gy / samples;
+    gz_bias = sum_gz / samples;
+
+    return true;
+}
+
+// =====================================================================
+// setup
+// =====================================================================
+void setup() {
+    Serial.begin(115200);
+
+    // 如果使用的是特殊的引脚，可以在这里设置 Wire.setSDA/setSCL
+    Wire.setSDA(IMU_SDA_PIN); // GP4
+    Wire.setSCL(IMU_SCL_PIN); // GP5
+    Wire.begin();
+
+    if (imu.beginI2C() != BMI2_OK) {
+        Serial.println("BMI270 Init Failed");
+        while (1);
+    }
+
+    Serial.println("深度零偏校准中（500点），请保持绝对静止...");
+    bool ok = false;
+    while (!ok) {
+        ok = deepCalibrate(500);
+        if (!ok) {
+            Serial.println("  抖动过大，3秒后重试，请放稳设备...");
+            delay(3000);
+        }
+    }
+
+    // 初始化滤波器历史值
+    imu.getSensorData();
+    last_ax = (imu.data.accelX - ax_bias) * GRAVITY;
+    last_ay = (imu.data.accelY - ay_bias) * GRAVITY;
+    last_az = (imu.data.accelZ - az_bias) * GRAVITY;
+
+    Serial.println("就绪！开始输出导航数据...");
+    
+    // 启动硬件定时器触发 100Hz 计算
+    add_repeating_timer_us(-10000, timer_callback, NULL, &timer);
+}
+
+// =====================================================================
+// loop
+// =====================================================================
+unsigned long last_print_time = 0;
+
+void loop() {
+    // 1. 检查定时中断是否触发了读取请求
+    if (sensor_data_ready) {
+        sensor_data_ready = false;
+        
+        // 在主上下文中安全读取 I2C 数据
+        imu.getSensorData();
+        
+        // 传入核心导航解算
+        updateNavigation(imu.data.accelX, imu.data.accelY, imu.data.accelZ,
+                         imu.data.gyroX,  imu.data.gyroY,  imu.data.gyroZ);
+    }
+
+    // 2. 异步限时打印（~50Hz 刷新速率，避免堵塞导航）
+    if (millis() - last_print_time >= 20) {
+        last_print_time = millis();
+
+        noInterrupts();
+        float px = snap_posX, py = snap_posY, pz = snap_posZ;
+        float vx = snap_velX, vy = snap_velY, vz = snap_velZ;
+        float ax = snap_ax,   ay = snap_ay,   az = snap_az;
+        bool  zupt = snap_zupt;
+        interrupts();
+
+        Serial.print("X:");    Serial.print(px, 3);
+        Serial.print(" Y:");   Serial.print(py, 3);
+        Serial.print(" Z:");   Serial.print(pz, 3);
+        Serial.print(" | VX:"); Serial.print(vx, 3);
+        Serial.print(" VY:");   Serial.print(vy, 3);
+        Serial.print(" VZ:");   Serial.print(vz, 3);
+        Serial.print(" | AX:"); Serial.print(ax, 2);
+        Serial.print(" AY:");   Serial.print(ay, 2);
+        Serial.print(" AZ:");   Serial.print(az, 2);
+        Serial.print(" | ");
+        Serial.println(zupt ? "STATIC" : "MOVING");
+    }
+}
