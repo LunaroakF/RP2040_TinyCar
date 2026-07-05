@@ -2,6 +2,8 @@
 #include "driver/ServoSG90.h"
 #include "Arduino.h"
 
+#include "config.h"
+
 
 
 class DistanceDetector {
@@ -26,7 +28,7 @@ public:
         if (angle != currentAngle) {
             servo.writeAngle(angle);
             currentAngle = angle;
-            delay(400); // 等待舵机就位
+            delay(SERVO_SETTLE_TIME); // 等待舵机就位
         }
     }
 
