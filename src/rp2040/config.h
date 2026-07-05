@@ -34,3 +34,5 @@
 #define WHEEL_BLOCK_COUNT 20
 // 车轮直径
 #define WHEEL_DIAMETER 6.2 // 单位: cm
+// 舵机就位时间
+#define SERVO_SETTLE_TIME 400 // 单位: ms
