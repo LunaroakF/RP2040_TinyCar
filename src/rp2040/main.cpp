@@ -21,7 +21,7 @@ static const int   SERVO_FRONT_DEG     = 90;
 static const int   SERVO_LEFT_DEG      = 180;
 static const int   SERVO_RIGHT_DEG     = 0;
 
-static const float TURN_STEP_DEG       = 83.0f; // 每次确认方向后，先转多少度再重新前进探测
+static const float TURN_STEP_DEG       = 30.0f; // 每次确认方向后，先转多少度再重新前进探测
 static const float YAW_TOLERANCE_DEG   = 3.0f;  // 转向到位的容差
 
 static const int   MAX_OBSTACLES       = 999;     // 障碍物坐标数组容量
