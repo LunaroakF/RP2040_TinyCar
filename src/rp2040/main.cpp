@@ -10,18 +10,18 @@
 #include "config.h"
 #include <math.h>
 
-// 行为参数（可根据实际测试效果调整）
+// 行为参数
 static const int   FORWARD_SPEED_PCT   = 50;   // 默认前进速度 (%)
 static const int   TURN_SPEED_PCT      = 55;   // 转向时的轮速 (%)
-static const float FRONT_STOP_DIST_CM  = 20.0f;// 正前方触发停车距离
-static const float CLEAR_DIST_CM       = 15.0f;// 判定"无障碍物"的距离阈值
+static const float FRONT_STOP_DIST_CM  = 20.0f;// 正前方触发停车距离 (cm)
+static const float CLEAR_DIST_CM       = 15.0f;// 判定"无障碍物"的距离阈值 (cm)
 
 // 舵机角度约定
-static const int   SERVO_FRONT_DEG     = 90;
-static const int   SERVO_LEFT_DEG      = 180;
-static const int   SERVO_RIGHT_DEG     = 0;
+static const int   SERVO_FRONT_DEG     = 90; // 舵机正前方角度
+static const int   SERVO_LEFT_DEG      = 180; // 舵机左侧角度
+static const int   SERVO_RIGHT_DEG     = 0; // 舵机右侧角度
 
-static const float TURN_STEP_DEG       = 30.0f; // 每次确认方向后，先转多少度再重新前进探测
+static const float TURN_STEP_DEG       = 90.0 - 10.0f; // 每次确认方向后，先转多少度再重新前进探测
 static const float YAW_TOLERANCE_DEG   = 3.0f;  // 转向到位的容差
 
 static const int   MAX_OBSTACLES       = 999;     // 障碍物坐标数组容量
@@ -29,17 +29,17 @@ static const int   MAX_OBSTACLES       = 999;     // 障碍物坐标数组容量
 // 左右都有障碍时的后退策略：第一次后退 BACKUP_STEP_CM，
 // 若再次左右都被挡住，则后退距离变为 BACKUP_STEP_CM*2，再不行 *3，以此类推，
 // 直到某一侧探测到无障碍物为止；一旦成功找到可通行方向，倍数清零重置为1。
-static const float BACKUP_STEP_CM      = 5.0f;
+static const float BACKUP_STEP_CM      = 5.0f; // 每次后退距离 (cm)
 static const int   BACKUP_SPEED_PCT    = 35;   // 后退速度 (%)
 
 // 硬件配置
 DistanceDetector barrierDetector(ULTRASONIC_TRIG_PIN, ULTRASONIC_ECHO_PIN, SERVO_PIN);
-WheelEncoder leftEncoder(LM_DO);
+WheelEncoder wheelEncoder(LM_DO);
 BMI270Rotation imuRot;
 MotorDriver motor(WHEEL_ENCODER_IN1, WHEEL_ENCODER_IN2, WHEEL_ENCODER_IN3, WHEEL_ENCODER_IN4);
 ESPLink esp(ECHIP_MOSI, ECHIP_MISO, ECHIP_SCLK, ECHIP_CS, 100000); // 100kHz，对ESP8266更稳
 
-unsigned long lastLoop = 0;
+unsigned long lastLoop = 0; // 上次循环打印调试信息的时间戳
 
 // 状态机
 enum RobotState {
@@ -50,9 +50,9 @@ enum RobotState {
     STATE_BACKING_UP     // 左右都有障碍，后退一段距离后重新检测
 };
 
-RobotState state = STATE_FORWARD;
+RobotState state = STATE_FORWARD; // 当前状态机状态
 
-// 位置与航向（航向直接取 IMU 的 Z 轴，即 yaw，单位：度）
+// 位置与航向（航向直接取 IMU 的 Z 轴 yaw）
 float robotX = 0.0f;
 float robotY = 0.0f;
 
@@ -82,17 +82,17 @@ float angleDiff(float target, float current) {
 }
 
 // 根据编码轮脉冲数与航向，累加二维位置（仅在直行状态下调用，转向时轮速不对称，单编码轮无法代表真实位移，故不在转向时累加）
-void updateOdometry(float headingDeg) {
-    long count = leftEncoder.getCount();
+void updateOdometry(float headingDeg, int forwardSign) {
+    long count = wheelEncoder.getCount();
     if (count == 0) return;
-    leftEncoder.reset();
+    wheelEncoder.reset();
 
-    float revolutions = (float)count / (float)WHEEL_BLOCK_COUNT;
-    float distanceCm = revolutions * PI * WHEEL_DIAMETER;
-
-    float rad = headingDeg * DEG_TO_RAD;
-    robotX += distanceCm * cos(rad);
-    robotY += distanceCm * sin(rad);
+    float revolutions = (float)count / (float)WHEEL_BLOCK_COUNT; // 编码轮转过的圈数
+    float distanceCm = revolutions * PI * WHEEL_DIAMETER; // 编码轮转过的距离(cm)
+    distanceCm *= forwardSign; // 根据前进方向调整距离符号
+    float rad = headingDeg * DEG_TO_RAD; // 航向角转弧度
+    robotX += distanceCm * cos(rad); // 累加X坐标
+    robotY += distanceCm * sin(rad); // 累加Y坐标
 }
 
 // 记录一个障碍物坐标（世界坐标系），基于当前车身位置 + 航向 + 舵机相对角 + 测得距离
@@ -100,9 +100,9 @@ void recordObstacle(float headingDeg, int servoAngle, float distanceCm) {
     if (obstacleCount >= MAX_OBSTACLES) return;
 
     float relativeAngle = (float)(servoAngle - SERVO_FRONT_DEG); // 相对车头的偏角
-    float worldAngleRad = (headingDeg + relativeAngle) * DEG_TO_RAD;
+    float worldAngleRad = (headingDeg + relativeAngle) * DEG_TO_RAD; // 转为世界坐标系的角度(弧度)
 
-    Obstacle o;
+    Obstacle o; // 计算障碍物的世界坐标
     o.x = robotX + distanceCm * cos(worldAngleRad);
     o.y = robotY + distanceCm * sin(worldAngleRad);
     obstacles[obstacleCount++] = o;
@@ -110,12 +110,10 @@ void recordObstacle(float headingDeg, int servoAngle, float distanceCm) {
     Serial.print("记录障碍物 #"); Serial.print(obstacleCount);
     Serial.print(" 坐标: ("); Serial.print(o.x, 1);
     Serial.print(", "); Serial.print(o.y, 1); Serial.println(")");
-    esp.putln("#" + String(o.x, 2) + "," + String(o.y, 2));
+    esp.putln("#" + String(o.x, 2) + "," + String(o.y, 2)); // 以#代表障碍物坐标发给ESP8266 保留2位小数
 }
 
-// 按符号原地转向：sign=+1 与 sign=-1 分别对应两个转向方向。
-// 具体哪个符号对应"向左"取决于电机接线，如实测方向相反，
-// 只需把 TURN_SIGN_LEFT 常量改成 -1 即可，无需改动其他逻辑。
+// 电机防接反用，方便调试修改
 static const int TURN_SIGN_LEFT = 1;
 
 void turnBySign(int sign, int speedPct) {
@@ -123,36 +121,37 @@ void turnBySign(int sign, int speedPct) {
     motor.setRightSpeed(-sign * speedPct);
 }
 
+// 根据 sign (+1=左转, -1=右转) 开始转向，记录目标航向，重置编码轮
 void startTurn(int sign) {
     turnSign = sign;
     float yaw = 0, dummyX = 0, dummyY = 0;
     imuRot.getRotation(dummyX, dummyY, yaw);
     turnTargetHeading = yaw + sign * TURN_STEP_DEG;
-    leftEncoder.reset();
+    wheelEncoder.reset();
     barrierDetector.aimServo(SERVO_FRONT_DEG); // 转向前先回正探头
-    turnBySign(sign, TURN_SPEED_PCT);
+    turnBySign(sign, TURN_SPEED_PCT); // 开始转向
     state = STATE_TURNING;
-    backupMultiplier = 1;
+    backupMultiplier = 1; // 转向后清零后退倍数
 }
 
+// 根据当前后退倍数，开始后退一段距离，重置编码轮
 void startBackup() {
     backupTargetCm = BACKUP_STEP_CM * backupMultiplier;
     backupTraveledCm = 0.0f;
     backupMultiplier++;
-    leftEncoder.reset();
+    wheelEncoder.reset();
     barrierDetector.aimServo(SERVO_FRONT_DEG); // 倒车时也看正前方，防止倒车撞上东西
     motor.setLeftSpeed(-BACKUP_SPEED_PCT);
     motor.setRightSpeed(-BACKUP_SPEED_PCT);
     state = STATE_BACKING_UP;
 }
 
-// ============================================================
-// setup / loop
-// ============================================================
+
 void setup() {
     Serial.begin(115200);
     Serial.println("正在初始化BMI270，请保持设备绝对静止...");
     delay(1000);
+    // 初始化BMI270 IMU，标定零偏
     if (!imuRot.begin(IMU_SDA_PIN, IMU_SCL_PIN, /*calib_samples=*/500)) {
        Serial.println("IMU初始化失败");
     }
@@ -160,9 +159,9 @@ void setup() {
        Serial.println("BMI270 初始化成功");
     }
     motor.begin();
-    leftEncoder.begin();
+    wheelEncoder.begin();
     esp.begin();
-
+    // 先让小车前进，方便调试时观察转向动作
     motor.setLeftSpeed(FORWARD_SPEED_PCT);
     motor.setRightSpeed(FORWARD_SPEED_PCT);
 }
@@ -171,26 +170,26 @@ void loop() {
     float ix, iy, yaw;
     imuRot.getRotation(ix, iy, yaw); // yaw(z) 作为航向角使用
 
-    // 每0.5秒打印一次调试信息
+    // 每0.1秒向电脑发送信息
     if (millis() - lastLoop >= 100) {
         lastLoop = millis();
-        // Serial.print("Left: "); Serial.print(leftEncoder.getCount());
-        // Serial.print(" Yaw(Z):"); Serial.print(yaw, 2);
-        // Serial.print(" Pos:("); Serial.print(robotX, 1);
-        // Serial.print(","); Serial.print(robotY, 1);
-        // Serial.print(") State:"); Serial.println((int)state);
+        Serial.print("Left: "); Serial.print(wheelEncoder.getCount());
+        Serial.print(" Yaw(Z):"); Serial.print(yaw, 2);
+        Serial.print(" Pos:("); Serial.print(robotX, 1);
+        Serial.print(","); Serial.print(robotY, 1);
+        Serial.print(") State:"); Serial.println((int)state);
         esp.putln("@" + String(robotX, 2) + "," + String(robotY, 2));// 发送当前位置给ESP8266 保留2位小数
     }
 
     switch (state) {
 
     case STATE_FORWARD: {
-        updateOdometry(yaw);
+        updateOdometry(yaw, 1);// 直行时累加位置
 
         if (barrierDetector.isObjectDetected(FRONT_STOP_DIST_CM, SERVO_FRONT_DEG)) {
             motor.stop();
-            leftEncoder.reset();
-            recordObstacle(yaw, SERVO_FRONT_DEG, FRONT_STOP_DIST_CM);
+            wheelEncoder.reset();
+            recordObstacle(yaw, SERVO_FRONT_DEG, FRONT_STOP_DIST_CM);// 记录正前方障碍物坐标
             Serial.println("正前方发现障碍物，停车，开始左右探查...");
             state = STATE_SCAN_LEFT;
         }
@@ -204,8 +203,6 @@ void loop() {
             startTurn(TURN_SIGN_LEFT);
         } else {
             // 左侧仍有障碍：记录坐标后转去看右侧
-            // TODO: 若 DistanceDetector 提供的是具体距离而非布尔z值，
-            // 请用实际距离替换下面的 CLEAR_DIST_CM
             recordObstacle(yaw, SERVO_LEFT_DEG, CLEAR_DIST_CM);
             Serial.println("左侧仍有障碍物，改为探查右侧");
             state = STATE_SCAN_RIGHT;
@@ -226,9 +223,9 @@ void loop() {
     }
 
     case STATE_BACKING_UP: {
-        long count = leftEncoder.getCount();
+        long count = wheelEncoder.getCount();
         if (count != 0) {
-            leftEncoder.reset();
+            wheelEncoder.reset();
             float revolutions = (float)count / (float)WHEEL_BLOCK_COUNT;
             float distanceCm = revolutions * PI * WHEEL_DIAMETER;
             backupTraveledCm += distanceCm;
@@ -241,7 +238,7 @@ void loop() {
 
         if (backupTraveledCm >= backupTargetCm) {
             motor.stop();
-            leftEncoder.reset();
+            wheelEncoder.reset();
             //motor.setLeftSpeed(FORWARD_SPEED_PCT);
             //motor.setRightSpeed(FORWARD_SPEED_PCT);
             Serial.println("后退完成，恢复直行并重新检测障碍物");
@@ -254,7 +251,7 @@ void loop() {
         float diff = angleDiff(turnTargetHeading, yaw);
         if (fabs(diff) <= YAW_TOLERANCE_DEG) {
             motor.stop();
-            leftEncoder.reset();
+            wheelEncoder.reset();
             motor.setLeftSpeed(FORWARD_SPEED_PCT);
             motor.setRightSpeed(FORWARD_SPEED_PCT);
             Serial.println("转向完成，恢复直行");

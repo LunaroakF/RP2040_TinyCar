@@ -27,9 +27,6 @@
 #define ECHIP_SCLK  10 // 连至ESP8266的 IO14 (SCLK) 或测试用ESP32的 IO14
 #define ECHIP_CS   9 // 连至ESP8266的 IO15 (CS) 或测试用ESP32的 IO27
 
-#define SPI_FRAME_SIZE 64
-#define SPI_SEND_INTERVAL_MS 20
-
 // 编码轮块数
 #define WHEEL_BLOCK_COUNT 20
 // 车轮直径
