@@ -17,6 +17,8 @@
 #define WHEEL_ENCODER_IN2 7
 #define WHEEL_ENCODER_IN3 12
 #define WHEEL_ENCODER_IN4 13
+#define WHEEL_PWMA 27
+#define WHEEL_PWMB 28
 
 // 轮子编码器输出
 #define LM_DO 14

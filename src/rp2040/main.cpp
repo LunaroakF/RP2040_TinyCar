@@ -11,8 +11,8 @@
 #include <math.h>
 
 // 行为参数
-static const int   FORWARD_SPEED_PCT   = 50;   // 默认前进速度 (%)
-static const int   TURN_SPEED_PCT      = 55;   // 转向时的轮速 (%)
+static const int   FORWARD_SPEED_PCT   = 90;   // 默认前进速度 (%)
+static const int   TURN_SPEED_PCT      = 70;   // 转向时的轮速 (%)
 static const float FRONT_STOP_DIST_CM  = 20.0f;// 正前方触发停车距离 (cm)
 static const float CLEAR_DIST_CM       = 15.0f;// 判定"无障碍物"的距离阈值 (cm)
 
@@ -30,13 +30,13 @@ static const int   MAX_OBSTACLES       = 999;     // 障碍物坐标数组容量
 // 若再次左右都被挡住，则后退距离变为 BACKUP_STEP_CM*2，再不行 *3，以此类推，
 // 直到某一侧探测到无障碍物为止；一旦成功找到可通行方向，倍数清零重置为1。
 static const float BACKUP_STEP_CM      = 5.0f; // 每次后退距离 (cm)
-static const int   BACKUP_SPEED_PCT    = 35;   // 后退速度 (%)
+static const int   BACKUP_SPEED_PCT    = 80;   // 后退速度 (%)
 
 // 硬件配置
 DistanceDetector barrierDetector(ULTRASONIC_TRIG_PIN, ULTRASONIC_ECHO_PIN, SERVO_PIN);
 WheelEncoder wheelEncoder(LM_DO);
 BMI270Rotation imuRot;
-MotorDriver motor(WHEEL_ENCODER_IN1, WHEEL_ENCODER_IN2, WHEEL_ENCODER_IN3, WHEEL_ENCODER_IN4);
+MotorDriver motor(WHEEL_ENCODER_IN1, WHEEL_ENCODER_IN2, WHEEL_ENCODER_IN3, WHEEL_ENCODER_IN4,WHEEL_PWMA,WHEEL_PWMB);
 ESPLink esp(ECHIP_MOSI, ECHIP_MISO, ECHIP_SCLK, ECHIP_CS, 100000); // 100kHz，对ESP8266更稳
 
 unsigned long lastLoop = 0; // 上次循环打印调试信息的时间戳
