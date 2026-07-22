@@ -11,7 +11,7 @@ private:
 
     const float SOUND_SPEED = 0.0343f; // cm/us（声速）
 
-    unsigned long timeout = 30000; // 30ms超时 ≈ 5m
+    unsigned long timeout = 30000; // 30ms超时
 
 public:
     HCSR04(int trig, int echo) {
@@ -25,7 +25,6 @@ public:
 
         digitalWrite(trigPin, LOW);
     }
-
     // 返回距离（厘米）
     float readDistanceCM() {
         // 1. 触发10us脉冲

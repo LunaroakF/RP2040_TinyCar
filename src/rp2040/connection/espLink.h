@@ -3,15 +3,6 @@
 
 #include <Arduino.h>
 
-// 必须与ESP32/ESP8266端的 FRAME_SIZE 保持一致
-//
-// ESP32 (driver/spi_slave.h 硬件驱动): 帧长可以自定义, 之前用的是64字节
-// ESP8266 (内置 SPISlave 库): 硬件限制, 每次收发必须严格是32字节
-//
-// 在RP2040这边编译时，取消下面这一行的注释即可切到ESP8266对应的帧长；
-// 保持注释状态(不定义)则默认按ESP32的64字节编译。
-// #define ESPLINK_TARGET_ESP8266
-
 #ifdef ESPLINK_TARGET_ESP8266
 #define ESPLINK_FRAME_SIZE   32   // 必须和ESP8266端 FRAME_SIZE 一致
 #else
@@ -19,21 +10,8 @@
 #endif
 #define ESPLINK_MAX_PAYLOAD  (ESPLINK_FRAME_SIZE - 1)
 
-// RP2040 -> ESP32/ESP8266 的SPI消息发送封装
-// 采用软件模拟SPI(bit-bang)，不依赖RP2040硬件SPI外设的固定引脚角色，
-// 任意GPIO都能当MOSI/MISO/SCLK/CS用，接线不受硬件SPI0/SPI1引脚表限制。
-//
-// 时序: SPI Mode 0 (CPOL=0, CPHA=0), MSB first
-//   - SCLK空闲为低电平
-//   - 数据在SCLK为低时准备好，SCLK上升沿被从机采样
-//
-// 帧格式: [0]=有效数据长度len (0~63), [1..len]=数据, 其余填0凑满FRAME_SIZE
-// len==0 会被ESP端当作心跳帧忽略
 class ESPLink {
 public:
-    // mosiPin/misoPin/sclkPin/csPin: RP2040这边接ESP的四个引脚，随便接哪个GPIO都行
-    // clockHz: 模拟SPI时钟频率。若对端是ESP8266(软件bit-bang从机)，建议 <=100000
-    //          若对端是ESP32(硬件SPI Slave)，可以适当调高
     ESPLink(uint8_t mosiPin, uint8_t misoPin, uint8_t sclkPin, uint8_t csPin,
             uint32_t clockHz = 100000)
         : _mosi(mosiPin), _miso(misoPin), _sclk(sclkPin), _cs(csPin) {
@@ -41,7 +19,6 @@ public:
         uint32_t halfPeriod = 500000UL / clockHz;
         _halfPeriodUs = halfPeriod < 1 ? 1 : halfPeriod;
     }
-
     void begin() {
         pinMode(_cs, OUTPUT);
         pinMode(_sclk, OUTPUT);
@@ -52,16 +29,13 @@ public:
         digitalWrite(_sclk, LOW);  // Mode0空闲电平为低
         digitalWrite(_mosi, LOW);
     }
-
     // 发送一条文本消息，超过63字节会自动分片成多帧发送
     void put(const String &msg) {
         put((const uint8_t*)msg.c_str(), msg.length());
     }
-
     void put(const char *msg) {
         put((const uint8_t*)msg, strlen(msg));
     }
-
     void put(const uint8_t *data, size_t len) {
         if (len == 0) {
             heartbeat();
@@ -74,17 +48,14 @@ public:
             offset += chunk;
         }
     }
-
-    // 心跳帧(len=0)，接收端会忽略内容，只用来保活/占位，可选调用
+    // 心跳帧(len=0)，接收端会忽略内容，只用来保活/占位，最终没有使用
     void heartbeat() {
         sendFrame(nullptr, 0);
     }
-
     // 和put()一样，但会在消息末尾自动加一个换行符，方便网页端按行显示
     void putln(const String &msg) {
         put(msg + "\n");
     }
-
     void putln(const char *msg) {
         String s(msg);
         s += "\n";

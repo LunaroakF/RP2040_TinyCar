@@ -50,30 +50,23 @@
 class BMI270Rotation {
 public:
     BMI270Rotation();
-
     // 初始化：配置I2C -> 连接BMI270 -> 静止零偏标定(记录初始偏移角度) -> 启动Core1后台任务
     // sda_pin/scl_pin: I2C引脚
     // calib_samples:   标定采样点数，越多越准但初始化越慢，默认500
     // 返回 true 表示初始化成功并已开始后台运行
     bool begin(uint8_t sda_pin, uint8_t scl_pin, int calib_samples = 500);
-
     // 销毁：通知Core1后台任务退出，并调用 multicore_reset_core1() 把该核心释放/复位
     // 调用后 Core1 可以被重新 begin()，或挪去做别的事情
     void end();
-
     // 获取当前姿态角，单位：度(deg)，相对于 begin() 完成那一刻的姿态
     // x = roll(绕X轴), y = pitch(绕Y轴), z = yaw(绕Z轴)
     void getRotation(float &x, float &y, float &z);
-
     // 获取去零偏后的瞬时角速度，单位：deg/s
     void getGyro(float &gx, float &gy, float &gz);
-
     // 当前IMU是否判定为静止状态（可用于调试/上层逻辑）
     bool isStationary();
-
     // 调试用：获取去零偏后的加速度(单位g)，用来自己核对静止时读数到底是多少
     void getAccel(float &ax, float &ay, float &az);
-
     // 后台任务是否仍在Core1上运行
     bool isRunning() const { return running; }
 

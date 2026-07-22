@@ -11,17 +11,17 @@
 #include <math.h>
 
 // 行为参数
-static const int   FORWARD_SPEED_PCT   = 90;   // 默认前进速度 (%)
+static const int   FORWARD_SPEED_PCT   = 60;   // 默认前进速度 (%)
 static const int   TURN_SPEED_PCT      = 70;   // 转向时的轮速 (%)
-static const float FRONT_STOP_DIST_CM  = 20.0f;// 正前方触发停车距离 (cm)
-static const float CLEAR_DIST_CM       = 15.0f;// 判定"无障碍物"的距离阈值 (cm)
+static const float FRONT_STOP_DIST_CM  = 25.0f;// 正前方触发停车距离 (cm)
+static const float CLEAR_DIST_CM       = 25.0f;// 判定"无障碍物"的距离阈值 (cm)
 
 // 舵机角度约定
 static const int   SERVO_FRONT_DEG     = 90; // 舵机正前方角度
 static const int   SERVO_LEFT_DEG      = 180; // 舵机左侧角度
 static const int   SERVO_RIGHT_DEG     = 0; // 舵机右侧角度
 
-static const float TURN_STEP_DEG       = 90.0 - 10.0f; // 每次确认方向后，先转多少度再重新前进探测
+static const float TURN_STEP_DEG       = 90.0 - 3.0f; // 每次确认方向后，先转多少度再重新前进探测
 static const float YAW_TOLERANCE_DEG   = 3.0f;  // 转向到位的容差
 
 static const int   MAX_OBSTACLES       = 999;     // 障碍物坐标数组容量
@@ -29,15 +29,15 @@ static const int   MAX_OBSTACLES       = 999;     // 障碍物坐标数组容量
 // 左右都有障碍时的后退策略：第一次后退 BACKUP_STEP_CM，
 // 若再次左右都被挡住，则后退距离变为 BACKUP_STEP_CM*2，再不行 *3，以此类推，
 // 直到某一侧探测到无障碍物为止；一旦成功找到可通行方向，倍数清零重置为1。
-static const float BACKUP_STEP_CM      = 5.0f; // 每次后退距离 (cm)
-static const int   BACKUP_SPEED_PCT    = 80;   // 后退速度 (%)
+static const float BACKUP_STEP_CM      = 30.0f; // 每次后退距离 (cm)
+static const int   BACKUP_SPEED_PCT    = 60;   // 后退速度 (%)
 
 // 硬件配置
 DistanceDetector barrierDetector(ULTRASONIC_TRIG_PIN, ULTRASONIC_ECHO_PIN, SERVO_PIN);
 WheelEncoder wheelEncoder(LM_DO);
 BMI270Rotation imuRot;
 MotorDriver motor(WHEEL_ENCODER_IN1, WHEEL_ENCODER_IN2, WHEEL_ENCODER_IN3, WHEEL_ENCODER_IN4,WHEEL_PWMA,WHEEL_PWMB);
-ESPLink esp(ECHIP_MOSI, ECHIP_MISO, ECHIP_SCLK, ECHIP_CS, 100000); // 100kHz，对ESP8266更稳
+ESPLink esp(ECHIP_MOSI, ECHIP_MISO, ECHIP_SCLK, ECHIP_CS, 100000); // 100kHz
 
 unsigned long lastLoop = 0; // 上次循环打印调试信息的时间戳
 
@@ -182,7 +182,7 @@ void loop() {
     }
 
     switch (state) {
-
+    // 正常前进，持续累加位置；一旦正前方探测到障碍物，停车并转去看左边
     case STATE_FORWARD: {
         updateOdometry(yaw, 1);// 直行时累加位置
 
@@ -195,7 +195,7 @@ void loop() {
         }
         break;
     }
-
+    // 先看左边，如果左边无障碍物就直接转向；如果左边有障碍物，再看右边；如果右边无障碍物就转向，否则两边都有障碍，开始后退
     case STATE_SCAN_LEFT: {
         bool leftBlocked = barrierDetector.isObjectDetected(CLEAR_DIST_CM, SERVO_LEFT_DEG);
         if (!leftBlocked) {
@@ -209,7 +209,7 @@ void loop() {
         }
         break;
     }
-
+    // 再看右边，如果右边无障碍物就转向，否则两边都有障碍，开始后退
     case STATE_SCAN_RIGHT: {
         bool rightBlocked = barrierDetector.isObjectDetected(CLEAR_DIST_CM, SERVO_RIGHT_DEG);
         if (!rightBlocked) {
@@ -221,7 +221,7 @@ void loop() {
         }
         break;
     }
-
+    // 转向中，持续检测是否转到位；一旦转到位，停车并恢复前进
     case STATE_BACKING_UP: {
         long count = wheelEncoder.getCount();
         if (count != 0) {
@@ -246,7 +246,7 @@ void loop() {
         }
         break;
     }
-
+    // 转向中，持续检测是否转到位；一旦转到位，停车并恢复前进
     case STATE_TURNING: {
         float diff = angleDiff(turnTargetHeading, yaw);
         if (fabs(diff) <= YAW_TOLERANCE_DEG) {
@@ -259,7 +259,6 @@ void loop() {
         }
         break;
     }
-
     }
 }
 

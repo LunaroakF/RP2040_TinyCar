@@ -16,14 +16,10 @@ public:
     MotorDriver(uint8_t in1, uint8_t in2, uint8_t in3, uint8_t in4,
                 uint8_t enA, uint8_t enB,
                 uint32_t pwmFreq = 20000);
-
     void begin();
-
     void setLeftSpeed(int speed);   // -100 ~ 100
     void setRightSpeed(int speed);  // -100 ~ 100
-
     void setSpeed(int leftSpeed, int rightSpeed); // 同时设置两轮
-
     void stop();                    // 两轮都停（自由停转，EN 拉低）
     void brake();                   // 两轮都刹车（抱死：IN 同时拉高 + EN 拉满）
 

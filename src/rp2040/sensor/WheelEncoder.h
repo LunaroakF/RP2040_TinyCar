@@ -15,25 +15,25 @@ public:
         : pin(encoderPin), debounceMicros(debounceUs) {
         encoderInstance = this;
     }
-
+    // 初始化编码器
     void begin() {
         pinMode(pin, INPUT_PULLUP);
         attachInterrupt(digitalPinToInterrupt(pin), isr, FALLING);
     }
-
+    // 获取脉冲计数
     long getCount() {
         noInterrupts();
         long c = pulseCount;
         interrupts();
         return c;
     }
-
+    // 重置脉冲计数
     void reset() {
         noInterrupts();
         pulseCount = 0;
         interrupts();
     }
-
+    // 中断服务程序
     static void isr() {
         if (encoderInstance) {
             unsigned long now = micros();

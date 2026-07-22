@@ -1,10 +1,7 @@
 #include "driver/HCSR04.h"
 #include "driver/ServoSG90.h"
 #include "Arduino.h"
-
 #include "config.h"
-
-
 
 class DistanceDetector {
 private:
@@ -18,11 +15,10 @@ public:
         detector.begin();
         servo.begin();
     }
-
+    // 获取距离
     float getDistanceCM() {
         return detector.readDistanceCM();
     }
-
     // 只转动，不测距。用于提前把探头转到需要的方向（比如转向/倒车前先回正）
     void aimServo(int angle) {
         if (angle != currentAngle) {
@@ -31,7 +27,7 @@ public:
             delay(SERVO_SETTLE_TIME); // 等待舵机就位
         }
     }
-
+    // 检测物体
     bool isObjectDetected(float thresholdCM, int angle) {
         aimServo(angle);
         float distance = getDistanceCM();

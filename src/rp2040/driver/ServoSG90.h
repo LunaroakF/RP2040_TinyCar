@@ -28,7 +28,7 @@ public:
         pwm_config_set_wrap(&cfg, 20000);
         pwm_init(slice_num, &cfg, true);
     }
-
+    // 设置舵机角度
     void writeAngle(int angle) {
         angle = constrain(angle, 0, 180);
         uint16_t pulse = 500 + (angle * 2000) / 180;

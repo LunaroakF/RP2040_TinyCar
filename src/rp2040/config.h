@@ -24,10 +24,10 @@
 #define LM_DO 14
 
 // ESP8266通信
-#define ECHIP_MOSI 8 // 连至ESP8266的 IO13 (MOSI) 或测试用ESP32的 IO13
-#define ECHIP_MISO 11 // 连至ESP8266的 IO12 (MISO) 或测试用ESP32的 IO12
-#define ECHIP_SCLK  10 // 连至ESP8266的 IO14 (SCLK) 或测试用ESP32的 IO14
-#define ECHIP_CS   9 // 连至ESP8266的 IO15 (CS) 或测试用ESP32的 IO27
+#define ECHIP_MOSI 8 // 连至ESP32的 IO13
+#define ECHIP_MISO 11 // 连至ESP32的 IO12
+#define ECHIP_SCLK  10 // 连至ESP32的 IO14
+#define ECHIP_CS   9 // 连至ESP32的 IO27
 
 // 编码轮块数
 #define WHEEL_BLOCK_COUNT 20
